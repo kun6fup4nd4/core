@@ -74,6 +74,14 @@ jobs:
           else
             echo "has_output=false" >> $GITHUB_OUTPUT
           fi
+        env:
+          # Use Personal Access Token if available, fallback to GITHUB_TOKEN
+          GITHUB_ACCESS_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          # Google Gemini API authentication
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || secrets.ORG_GOOGLE_API_KEY }}
+          # Optional integrations
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN || secrets.ORG_SLACK_BOT_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY || secrets.ORG_LINEAR_API_KEY }}
           
       - name: Upload review output
         if: steps.security_review.outputs.has_output == 'true'
@@ -91,15 +99,6 @@ jobs:
           # Base64 encode to handle special characters
           ENCODED_OUTPUT=$(base64 -w 0 security_review_output.txt | head -c 60000)
           echo "encoded_report=${ENCODED_OUTPUT}" >> $GITHUB_OUTPUT
-        env:
-          # Use Personal Access Token if available, fallback to GITHUB_TOKEN
-          GITHUB_ACCESS_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-          # Google Gemini API authentication - check agno docs for exact variable name
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || secrets.ORG_GOOGLE_API_KEY }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS || secrets.ORG_GOOGLE_APPLICATION_CREDENTIALS }}
-          # Optional integrations
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN || secrets.ORG_SLACK_BOT_TOKEN }}
-          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY || secrets.ORG_LINEAR_API_KEY }}
           
       - name: Comment on PR with results
         uses: actions/github-script@v7
