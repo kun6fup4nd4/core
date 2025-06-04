@@ -14,13 +14,27 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      actions: read  # To read workflow runs
+      statuses: read # To read commit statuses
     
     steps:
+      - name: Get PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            return pr.data;
+            
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
           # Checkout the PR branch
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ fromJSON(steps.pr.outputs.result).head.sha }}
           
       - name: Checkout argus-agent repository
         uses: actions/checkout@v4
@@ -48,6 +62,8 @@ jobs:
           PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.issue.number }}"
           
           # Run the security review and capture output
+          # Note: If you get "Bad credentials" error, you may need to use a Personal Access Token
+          # instead of GITHUB_TOKEN. Set it as a secret named GH_PAT with repo scope.
           python agent.py --pull-request "$PR_URL" 2>&1 | tee security_review_output.txt || true
           
           # Check if output file exists and has content
@@ -76,7 +92,8 @@ jobs:
           ENCODED_OUTPUT=$(base64 -w 0 security_review_output.txt | head -c 60000)
           echo "encoded_report=${ENCODED_OUTPUT}" >> $GITHUB_OUTPUT
         env:
-          GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use Personal Access Token if available, fallback to GITHUB_TOKEN
+          GITHUB_ACCESS_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           # Google Gemini API authentication - check agno docs for exact variable name
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || secrets.ORG_GOOGLE_API_KEY }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS || secrets.ORG_GOOGLE_APPLICATION_CREDENTIALS }}
