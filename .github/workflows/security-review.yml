@@ -48,13 +48,33 @@ jobs:
           PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.issue.number }}"
           
           # Run the security review and capture output
-          python agent.py --pull-request "$PR_URL" --debug 2>&1 | tee security_review_output.txt
+          python agent.py --pull-request "$PR_URL" 2>&1 | tee security_review_output.txt || true
           
-          # Save the output for the next step
-          # Limit to 65000 characters (GitHub comment limit is 65536)
-          echo "report<<EOF" >> $GITHUB_OUTPUT
-          head -c 65000 security_review_output.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Check if output file exists and has content
+          if [ -f security_review_output.txt ] && [ -s security_review_output.txt ]; then
+            # Escape special characters and save to artifact
+            echo "REVIEW_OUTPUT_FILE=security_review_output.txt" >> $GITHUB_OUTPUT
+            echo "has_output=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_output=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Upload review output
+        if: steps.security_review.outputs.has_output == 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-review-output
+          path: argus-agent/security_review_output.txt
+          
+      - name: Read review output
+        id: read_output
+        if: steps.security_review.outputs.has_output == 'true'
+        run: |
+          # Read and prepare output for comment
+          cd argus-agent
+          # Base64 encode to handle special characters
+          ENCODED_OUTPUT=$(base64 -w 0 security_review_output.txt | head -c 60000)
+          echo "encoded_report=${ENCODED_OUTPUT}" >> $GITHUB_OUTPUT
         env:
           GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Google Gemini API authentication - check agno docs for exact variable name
@@ -69,10 +89,14 @@ jobs:
         if: always()
         with:
           script: |
-            const output = `${{ steps.security_review.outputs.report }}`;
+            const hasOutput = '${{ steps.security_review.outputs.has_output }}' === 'true';
+            const encodedOutput = '${{ steps.read_output.outputs.encoded_report }}';
             let comment;
             
-            if (output && output.trim() !== '') {
+            if (hasOutput && encodedOutput) {
+              // Decode base64 output
+              const output = Buffer.from(encodedOutput, 'base64').toString('utf-8');
+              
               // Format the report in a collapsible section
               comment = `## 🔍 Security Review Report
               
@@ -90,7 +114,9 @@ jobs:
             } else {
               comment = `## 🔍 Security Review Report
               
-            ❌ Failed to generate security review report. Please check the [action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.`;
+            ❌ Failed to generate security review report. Please check the [action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+            
+            You can also download the full output as an artifact if available.`;
             }
             
             github.rest.issues.createComment({
