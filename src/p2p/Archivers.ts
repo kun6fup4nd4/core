@@ -1031,6 +1031,7 @@ export function removeArchiverConnection(publicKey) {
 
 export function registerRoutes() {
   network.registerExternalPost('joinarchiver', (req, res) => {
+    console.log('joinarchiver request received', req.body)
     const err = validateTypes(req, { body: 'o' })
     if (err) {
       warn(`joinarchiver: bad req ${err}`)
