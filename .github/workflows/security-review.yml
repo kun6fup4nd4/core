@@ -43,7 +43,9 @@ jobs:
       - name: Run security review
         run: |
           cd argus-agent
-          python agent.py --target ../ --pr ${{ github.event.issue.number }}
+          # Construct the pull request URL
+          PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.issue.number }}"
+          python agent.py --pull-request "$PR_URL" --debug
         env:
           GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Google Gemini API authentication - check agno docs for exact variable name
