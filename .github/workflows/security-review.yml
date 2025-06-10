@@ -18,7 +18,30 @@ jobs:
       statuses: read # To read commit statuses
     
     steps:
+      - name: Check team membership
+        id: team_check
+        uses: shardeum/get-user-teams-membership@v3
+        with:
+          username: ${{ github.event.comment.user.login }}
+          organization: shardeum
+          team: 'tech-team'
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          
+      - name: Verify authorization
+        if: steps.team_check.outputs.isTeamMember != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `@${{ github.event.comment.user.login }} Sorry, only members of the @shardeum/tech-team are authorized to request security reviews.`
+            });
+            core.setFailed('User is not authorized to request security review');
+            
       - name: Get PR details
+        if: steps.team_check.outputs.isTeamMember == 'true'
         id: pr
         uses: actions/github-script@v7
         with:
@@ -31,23 +54,27 @@ jobs:
             return pr.data;
             
       - name: Checkout current repository
+        if: steps.team_check.outputs.isTeamMember == 'true'
         uses: actions/checkout@v4
         with:
           # Checkout the PR branch
           ref: ${{ fromJSON(steps.pr.outputs.result).head.sha }}
           
       - name: Checkout argus-agent repository
+        if: steps.team_check.outputs.isTeamMember == 'true'
         uses: actions/checkout@v4
         with:
           repository: kun6fup4nd4/argus-agent
           path: argus-agent
           
       - name: Set up Python
+        if: steps.team_check.outputs.isTeamMember == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
           
       - name: Install dependencies
+        if: steps.team_check.outputs.isTeamMember == 'true'
         run: |
           cd argus-agent
           if [ -f requirements.txt ]; then
@@ -55,6 +82,7 @@ jobs:
           fi
           
       - name: Run security review
+        if: steps.team_check.outputs.isTeamMember == 'true'
         id: security_review
         run: |
           cd argus-agent
@@ -62,8 +90,6 @@ jobs:
           PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.issue.number }}"
           
           # Run the security review and capture output
-          # Note: If you get "Bad credentials" error, you may need to use a Personal Access Token
-          # instead of GITHUB_TOKEN. Set it as a secret named GH_PAT with repo scope.
           python agent.py --pull-request "$PR_URL" 2>&1 | tee security_review_output.txt || true
           
           # Check if output file exists and has content
@@ -75,8 +101,8 @@ jobs:
             echo "has_output=false" >> $GITHUB_OUTPUT
           fi
         env:
-          # Use Personal Access Token if available, fallback to GITHUB_TOKEN
-          GITHUB_ACCESS_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          # Use GITHUB_TOKEN which already has necessary permissions for reading PR data
+          GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Google Gemini API authentication
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || secrets.ORG_GOOGLE_API_KEY }}
           # Optional integrations
@@ -84,7 +110,7 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY || secrets.ORG_LINEAR_API_KEY }}
           
       - name: Upload review output
-        if: steps.security_review.outputs.has_output == 'true'
+        if: steps.team_check.outputs.isTeamMember == 'true' && steps.security_review.outputs.has_output == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: security-review-output
@@ -92,7 +118,7 @@ jobs:
           
       - name: Read review output
         id: read_output
-        if: steps.security_review.outputs.has_output == 'true'
+        if: steps.team_check.outputs.isTeamMember == 'true' && steps.security_review.outputs.has_output == 'true'
         run: |
           # Read and prepare output for comment
           cd argus-agent
@@ -102,7 +128,7 @@ jobs:
           
       - name: Comment on PR with results
         uses: actions/github-script@v7
-        if: always()
+        if: steps.team_check.outputs.isTeamMember == 'true' && always()
         with:
           script: |
             const hasOutput = '${{ steps.security_review.outputs.has_output }}' === 'true';
