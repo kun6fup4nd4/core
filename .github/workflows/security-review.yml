@@ -14,26 +14,67 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      actions: read  # To read workflow runs
+      statuses: read # To read commit statuses
     
     steps:
+      - name: Check team membership
+        id: team_check
+        uses: shardeum/get-user-teams-membership@v3
+        with:
+          username: ${{ github.event.comment.user.login }}
+          organization: shardeum
+          team: 'tech-team'
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          
+      - name: Verify authorization
+        if: steps.team_check.outputs.isTeamMember != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `@${{ github.event.comment.user.login }} Sorry, only members of the @shardeum/tech-team are authorized to request security reviews.`
+            });
+            core.setFailed('User is not authorized to request security review');
+            
+      - name: Get PR details
+        if: steps.team_check.outputs.isTeamMember == 'true'
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            return pr.data;
+            
       - name: Checkout current repository
+        if: steps.team_check.outputs.isTeamMember == 'true'
         uses: actions/checkout@v4
         with:
           # Checkout the PR branch
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ fromJSON(steps.pr.outputs.result).head.sha }}
           
       - name: Checkout argus-agent repository
+        if: steps.team_check.outputs.isTeamMember == 'true'
         uses: actions/checkout@v4
         with:
           repository: kun6fup4nd4/argus-agent
           path: argus-agent
           
       - name: Set up Python
+        if: steps.team_check.outputs.isTeamMember == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
           
       - name: Install dependencies
+        if: steps.team_check.outputs.isTeamMember == 'true'
         run: |
           cd argus-agent
           if [ -f requirements.txt ]; then
@@ -41,6 +82,7 @@ jobs:
           fi
           
       - name: Run security review
+        if: steps.team_check.outputs.isTeamMember == 'true'
         id: security_review
         run: |
           cd argus-agent
@@ -58,9 +100,17 @@ jobs:
           else
             echo "has_output=false" >> $GITHUB_OUTPUT
           fi
+        env:
+          # Use GITHUB_TOKEN which already has necessary permissions for reading PR data
+          GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Google Gemini API authentication
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || secrets.ORG_GOOGLE_API_KEY }}
+          # Optional integrations
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN || secrets.ORG_SLACK_BOT_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY || secrets.ORG_LINEAR_API_KEY }}
           
       - name: Upload review output
-        if: steps.security_review.outputs.has_output == 'true'
+        if: steps.team_check.outputs.isTeamMember == 'true' && steps.security_review.outputs.has_output == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: security-review-output
@@ -68,25 +118,17 @@ jobs:
           
       - name: Read review output
         id: read_output
-        if: steps.security_review.outputs.has_output == 'true'
+        if: steps.team_check.outputs.isTeamMember == 'true' && steps.security_review.outputs.has_output == 'true'
         run: |
           # Read and prepare output for comment
           cd argus-agent
           # Base64 encode to handle special characters
           ENCODED_OUTPUT=$(base64 -w 0 security_review_output.txt | head -c 60000)
           echo "encoded_report=${ENCODED_OUTPUT}" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Google Gemini API authentication - check agno docs for exact variable name
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || secrets.ORG_GOOGLE_API_KEY }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS || secrets.ORG_GOOGLE_APPLICATION_CREDENTIALS }}
-          # Optional integrations
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN || secrets.ORG_SLACK_BOT_TOKEN }}
-          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY || secrets.ORG_LINEAR_API_KEY }}
           
       - name: Comment on PR with results
         uses: actions/github-script@v7
-        if: always()
+        if: steps.team_check.outputs.isTeamMember == 'true' && always()
         with:
           script: |
             const hasOutput = '${{ steps.security_review.outputs.has_output }}' === 'true';
