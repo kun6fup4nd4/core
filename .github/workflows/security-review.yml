@@ -24,7 +24,7 @@ jobs:
         with:
           username: ${{ github.event.comment.user.login }}
           organization: shardeum
-          team: 'tech-team'
+          team: 'Tech Team'
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           
       - name: Debug team check output
@@ -33,7 +33,7 @@ jobs:
           echo "Teams list: '${{ steps.team_check.outputs.teams }}'"
           echo "Username checked: '${{ github.event.comment.user.login }}'"
           echo "Organization: 'shardeum'"
-          echo "Team: 'tech-team'"
+          echo "Team: 'Tech Team'"
           
       - name: Verify authorization
         if: ${{ steps.team_check.outputs.isTeamMember != 'true' }}
@@ -44,7 +44,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `@${{ github.event.comment.user.login }} Sorry, only members of the @shardeum/tech-team are authorized to request security reviews.`
+              body: `@${{ github.event.comment.user.login }} Sorry, only members of the Tech Team are authorized to request security reviews.`
             });
             core.setFailed('User is not authorized to request security review');
             
